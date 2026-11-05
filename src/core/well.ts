@@ -284,13 +284,18 @@ export function calcWellFromPwf(
   const pBufCalcFinal = tubingTop[travLen(tubingTop) - 1].pAtma;
   const powerElectricW = pump.powerShaftW / Math.max(p.motorEffD, 0.3);
   const specificEnergy = qLiq > 0 ? (powerElectricW / 1000) * 24 / qLiq : 0; // кВт·ч/м3
+  // насос не тянет: отрицательный напор (например, кривая снята на другой частоте,
+  // слишком много газа или расход за пределами кривой)
+  const pumpFailed = pump.pDisAtma < pIntake - 0.5;
 
   const qVent = Math.max(0, qSepFixed - (valveOn ? qValve : 0));
   const gasTubing = gasFreeAtP(pIntake, tIntake);
 
   return {
-    ok: true,
-    message: "",
+    ok: !pumpFailed,
+    message: pumpFailed
+      ? "Насос не обеспечивает подъём (напор ≤ 0): проверьте частоту, число ступеней, насос или газосодержание на приёме"
+      : "",
     qLiqSm3day: qLiq, qOilSm3day: qOil, qWatSm3day: qWat,
     pwfAtma, pIntakeAtma: pIntake, pDisAtma: pDis, pBufCalcAtma: pBufCalcFinal,
     qGasFreeIntakeSm3day: qGasFreeIntake,

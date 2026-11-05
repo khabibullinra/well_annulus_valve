@@ -97,10 +97,14 @@ function buildInputs(): void {
     html += "</div>";
   }
   // селекторы; насос по умолчанию — ближайший по номиналу к тестовому дебиту
+  // (только насосы со стандартной частотой 50 Гц; нестандартные помечаем)
   const qTestDef = NUM_FIELDS.find((f) => f.key === "qTestSm3day")!.def;
   const defaultPumpIdx = PUMPS.reduce(
-    (best, p, i) =>
-      Math.abs(p.rateNom - qTestDef) < Math.abs(PUMPS[best].rateNom - qTestDef) ? i : best, 0);
+    (best, p, i) => {
+      if (p.freqHz !== 50) return best;
+      if (PUMPS[best].freqHz !== 50) return i;
+      return Math.abs(p.rateNom - qTestDef) < Math.abs(PUMPS[best].rateNom - qTestDef) ? i : best;
+    }, 0);
   html += `
     <div class="group"><div class="group-title">PVT (прочее)</div>
       <div class="field"><label for="inp_zcor">Z-фактор</label>
@@ -112,7 +116,7 @@ function buildInputs(): void {
     </div>
     <div class="group"><div class="group-title">ЭЦН (прочее)</div>
       <div class="field"><label for="inp_pump">Насос</label>
-        <select id="inp_pump">${PUMPS.map((p, i) => `<option value="${i}"${i === defaultPumpIdx ? " selected" : ""}>${p.id} (ном. ${p.rateNom} м3/сут)</option>`).join("")}</select></div>
+        <select id="inp_pump">${PUMPS.map((p, i) => `<option value="${i}"${i === defaultPumpIdx ? " selected" : ""}>${p.id} (ном. ${p.rateNom} м3/сут@${p.freqHz}Гц)</option>`).join("")}</select></div>
       <div class="field"><label for="inp_gasmodel">Модель деградации по газу</label>
         <select id="inp_gasmodel">${GAS_MODELS.map((m) => `<option value="${m.v}"${m.v === 1 ? " selected" : ""}>${m.label}</option>`).join("")}</select></div>
       <button id="btn_auto_stages" class="btn small" type="button">Авто-ступени под условия</button>

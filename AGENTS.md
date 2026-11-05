@@ -111,16 +111,26 @@ HTML-приложение для расчёта работы добывающе�
 
 ```
 src/
-  core/        расчётное ядро (без DOM, работает в node и worker)
+  core/        расчётное ядро (без DOM, работает в node и в браузере)
     units.ts, pvt.ts, feed.ts, ipr.ts, driftflux.ts, esp.ts,
-    valve.ts, annulus.ts, well.ts, scenarios.ts, sweep.ts
+    valve.ts, annulus.ts, well.ts, sweep.ts
   data/pumps.json   43 насоса из БД unfpy
-  ui/          UI-слой (DOM, canvas-графики)
-  worker/      Web Worker для sweep
-tests/         vitest: паритет с эталонами unfpy + sanity + решатель
-index.html     приложение (грузит bundle.js)
-dist/          собранный bundle.js (esbuild, не коммитить)
+  ui/          UI-слой: charts.ts (canvas-графики), main.ts (панель, вкладки,
+               сводка, chunked sweep — worker не нужен, расчёт ~20 мс/решение)
+tests/         vitest: паритет с эталонами unfpy + sanity + решатель + стресс
+index.html     приложение (грузит dist/bundle.js)
+dist/          собранный bundle.js + index.html (не коммитить)
 ```
+
+## Статус реализации (ночь 2026-11-06)
+
+Все волны выполнены: ядро (PVT с паритетом 333 теста, IPR, drift-flux, ЭЦН,
+клапан, затруб, сквозной решатель, сценарии А/Б/В, sweep), UI со всеми вкладками
+(профили P/T/α, узловой анализ IPR+VLP с рабочей точкой, характеристики ЭЦН с
+деградацией, анализ клапана q_клапана(P_затр) с равновесием, поиск оптимума
+сеткой с клик-применением), стресс-тесты (72 комбинации + границы — без NaN).
+Проверено в браузере. Известные упрощения: вертикальная скважина, геотерма без
+нагрева насоса, ksep постоянный, клапан — идеальный дроссель с Cd.
 
 ## Команды
 

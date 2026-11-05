@@ -115,13 +115,15 @@ export function solveAnnulus(inp: AnnulusInput, pCasGivenAtma: number | null): A
   const gasCol = (hLl: number) =>
     gasColumnDown(pCasGivenAtma, 0, hLl, inp.gammaGas, inp.zCorrelation, inp.tAtDepthC, 10);
 
-  // жидкостный марш вниз от уровня к приёму
-  const marchDownFromLevel = (hLl: number): number => {
+  // жидкостный марш вниз от уровня до глубины hTo (по умолчанию — приём насоса);
+  // возвращает давление на глубине hTo
+  const marchDownFromLevel = (hLl: number, hToIn?: number): number => {
     const nSeg = inp.nSeg ?? 60;
     const area = annulusAreaM2(inp.dCasingM, inp.dTubingOdM);
     const sigma = inp.sigmaNm ?? 0.03;
     let p = gasCol(hLl);
-    const hFrom = hLl, hTo = inp.hEspM;
+    const hFrom = hLl, hTo = Math.min(hToIn ?? inp.hEspM, inp.hEspM);
+    if (hTo <= hFrom) return p;
     const n = Math.max(2, Math.round((nSeg * (hTo - hFrom)) / Math.max(inp.hEspM, 1)));
     const dz = (hTo - hFrom) / n;
     let z = hFrom;
@@ -185,9 +187,11 @@ export function solveAnnulus(inp: AnnulusInput, pCasGivenAtma: number | null): A
     if (hi - lo < 0.05) break;
   }
   const hLl = 0.5 * (lo + hi);
+  // давление на клапане: если клапан погружён (уровень выше клапана) — марш
+  // от уровня вниз ДО КЛАПАНА; иначе клапан в газовой шапке — вес газовой колонны
   const pAtValve =
     valveSubmergedPossible && hLl < inp.hValveM!
-      ? marchDownFromLevel(inp.hValveM!)
+      ? marchDownFromLevel(hLl, inp.hValveM!)
       : gasCol(inp.hValveM ?? 0);
   return {
     pCasCalcAtma: pCasGivenAtma,
