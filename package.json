@@ -1,0 +1,19 @@
+{
+  "name": "well_annulus_valve",
+  "version": "0.1.0",
+  "description": "Расчёт скважины с УЭЦН и газлифтным клапаном перепуска газа из затрубья в НКТ",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build": "node build.mjs",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}
