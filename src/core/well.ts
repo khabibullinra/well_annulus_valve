@@ -126,6 +126,8 @@ export interface CalcMode {
   ksepEff: number;
   /** фиксированный расход через клапан (ст.м3/сут) или null — из уравнения клапана */
   qValveOverride?: number | null;
+  /** фиксированный дебит жидкости (ст.м3/сут) — вместо IPR (для VLP-кривой) */
+  qLiqOverride?: number | null;
 }
 
 /**
@@ -142,7 +144,9 @@ export function calcWellFromPwf(
     pResAtma: p.pResAtma, pbAtma: p.pbIprAtma,
     qTestSm3day: p.qTestSm3day, pTestAtma: p.pTestAtma, fwPerc: p.fwPerc,
   };
-  const qLiq = vogelQLiqSm3day(pwfAtma, ipr);
+  const qLiq = mode.qLiqOverride != null
+    ? Math.max(0, mode.qLiqOverride)
+    : vogelQLiqSm3day(pwfAtma, ipr);
   const feedBelow = makeFeed(p, qLiq);
   const qOil = qLiq * (1 - p.fwPerc / 100);
   const qWat = qLiq * (p.fwPerc / 100);
@@ -370,7 +374,7 @@ export function solveValveScenario(p: WellParams, pumpDb: PumpDbRecord): ValveSc
       // равновесие достигается даже при минимальном P_cas: жидкость заполнит затруб,
       // верхнее давление — расчётное при полном проходе газа
       const free = solveWell(p, pumpDb, { pCasAtma: null, ksepEff: p.ksep, qValveOverride: null });
-      // уточняем: q_valve должен быть равен q_sep — считаем с навязанным равенством
+      // навязываем равенство потоков (массбаланс): клапан пропускает ровно q_sep
       const eq = solveWell(p, pumpDb, { pCasAtma: null, ksepEff: p.ksep, qValveOverride: free.qSepSm3day });
       return {
         ...eq,
@@ -380,18 +384,22 @@ export function solveValveScenario(p: WellParams, pumpDb: PumpDbRecord): ValveSc
         message: "Закрытая задвижка возможна: весь газ уходит через клапан",
       };
     }
-    // бисекция по P_cas: g(P) = q_valve(P) − q_sep
+    // бисекция по P_cas: g(P) = q_valve(P) − q_sep; равновесие на пороге открытия
     let lo = 1.2, hi = p.pCasMaxAtma;
+    let qSepEq = atMax.qSepSm3day;
     for (let i = 0; i < 22; i++) {
       const mid = 0.5 * (lo + hi);
       const sol = solveWell(p, pumpDb, { pCasAtma: mid, ksepEff: p.ksep });
       const gap = sol.qValveSm3day - sol.qSepSm3day;
+      qSepEq = sol.qSepSm3day;
       if (gap > 0) hi = mid; else lo = mid;
       if (hi - lo < 0.1) break;
     }
-    // финальный расчёт при равновесном P_cas с навязанным равенством потоков
-    const pEq = 0.5 * (lo + hi);
-    const eq = solveWell(p, pumpDb, { pCasAtma: pEq, ksepEff: p.ksep, qValveOverride: undefined });
+    // финальный расчёт при равновесном P_cas; клапан назначен на q_sep (массбаланс,
+    // физически: газовая шапка опирается на порог открытия, ΔP → 0+).
+    // pEq = hi — наименьшее давление, при котором клапан открыт (иначе ΔP < 0).
+    const pEq = hi;
+    const eq = solveWell(p, pumpDb, { pCasAtma: pEq, ksepEff: p.ksep, qValveOverride: qSepEq });
     return {
       ...eq,
       closedValveFeasible: true,

@@ -146,8 +146,8 @@ export function solveAnnulus(inp: AnnulusInput, pCasGivenAtma: number | null): A
     return p;
   };
 
-  // граничные случаи
-  const pFullLiquid = pCasGivenAtma + fullLiquidWeight(inp, qValve);
+  // граничные случаи: marchDownFromLevel(0) = заданное P_cas + полный жидкостный столб
+  const pFullLiquid = marchDownFromLevel(0);
   if (pFullLiquid <= inp.pIntakeAtma) {
     // даже полный столб жидкости не даёт давления приёма — шапки нет, верхнее давление выше заданного
     const up = marchUp(inp, qValve);
@@ -173,12 +173,16 @@ export function solveAnnulus(inp: AnnulusInput, pCasGivenAtma: number | null): A
     };
   }
 
-  // бисекция по глубине уровня
+  // бисекция по глубине уровня (с ранним выходом по точности давления)
   let lo = 0, hi = inp.hEspM; // f(lo)=pFull-pIntake>0, f(hi)=pAllGas-pIntake<0
-  for (let i = 0; i < 40; i++) {
+  const tolP = 0.005 * Math.max(inp.pIntakeAtma, 1);
+  for (let i = 0; i < 30; i++) {
     const mid = 0.5 * (lo + hi);
-    if (marchDownFromLevel(mid) > inp.pIntakeAtma) lo = mid;
+    const pMid = marchDownFromLevel(mid);
+    if (Math.abs(pMid - inp.pIntakeAtma) < tolP) { lo = hi = mid; break; }
+    if (pMid > inp.pIntakeAtma) lo = mid;
     else hi = mid;
+    if (hi - lo < 0.05) break;
   }
   const hLl = 0.5 * (lo + hi);
   const pAtValve =
@@ -192,12 +196,6 @@ export function solveAnnulus(inp: AnnulusInput, pCasGivenAtma: number | null): A
     nodes: [],
     pAtValveAnnAtma: pAtValve,
   };
-}
-
-/** Вес полного жидкостного столба затруба с барботажем, atma (оценка сверху для границы). */
-function fullLiquidWeight(inp: AnnulusInput, qValve: number): number {
-  const up = marchUp(inp, qValve);
-  return inp.pIntakeAtma - up.pTopAtma;
 }
 
 function interpPressure(nodes: TraverseNode[], z: number): number {

@@ -173,6 +173,7 @@ export interface EspCalcResult {
   gasFracIntake: number;
   gasCorr: number;
   qMixRcM3day: number; // смесь через насос (пласт. усл.), м3/сут
+  rhoMixIntakeKgm3: number; // плотность смеси на приёме (для графиков мощности)
 }
 
 export interface EspOptions {
@@ -273,6 +274,7 @@ export class EspPump {
     gasFracIntake = st.gasFractionD;
     gasCorr = gasCorrectionFactor(o.gasCorrectModel, gasFracIntake);
     qMixRc = st.qMixRcM3day;
+    const rhoMixIntake = st.rhoMixRcKgm3;
 
     const dNst = 1; // по одной ступени — точно по газосодержанию
     let n = 0;
@@ -320,6 +322,7 @@ export class EspPump {
       gasFracIntake,
       gasCorr,
       qMixRcM3day: qMixRc,
+      rhoMixIntakeKgm3: rhoMixIntake,
     };
   }
 

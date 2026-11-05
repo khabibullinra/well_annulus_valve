@@ -46,15 +46,16 @@ export function sweepValve(
   hValveList: number[],
   dOrificeList: number[],
   onProgress?: (done: number, total: number, cell: SweepCell) => void,
+  baselines?: { open: WellSolution; closed: WellSolution },
 ): SweepResult {
   const cells: SweepCell[] = [];
   const total = hValveList.length * dOrificeList.length;
   let done = 0;
 
-  // базовые сценарии (без клапана)
+  // базовые сценарии (без клапана) — можно передать готовые, чтобы не считать на каждую ячейку
   const pNoValve: WellParams = { ...p, valveEnabled: false };
-  const baselineOpen = solveBaselineOpen(pNoValve, pumpDb);
-  const baselineClosed = solveBaselineClosed(pNoValve, pumpDb);
+  const baselineOpen = baselines?.open ?? solveBaselineOpen(pNoValve, pumpDb);
+  const baselineClosed = baselines?.closed ?? solveBaselineClosed(pNoValve, pumpDb);
 
   for (const hValveM of hValveList) {
     for (const dOrificeMm of dOrificeList) {
