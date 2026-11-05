@@ -81,19 +81,20 @@ export interface TraverseInput {
   zTopM: number;
   /** внутренний диаметр канала, м */
   dM: number;
-  /** скорость (0 => чистый барботаж/гидростатика) */
-  qLiqSm3day: number; // жидкость ст.у (для барботажа игнорируется)
-  /** объёмный расход газа как функция давления (ст.м3/сут) */
-  qGasFreeSm3day: number;
-  /** свойства жидкости (пласт. усл.) */
-  rhoLiqKgm3: number;
-  muLiqCP: number;
-  /** газ: относительная плотность; PVT газа считается внутри по Z-фактору */
+  /** приведённая скорость жидкости, ст.м3/сут (0 => барботаж/гидростатика) */
+  qLiqSm3day: number;
+  /** свободный газ (ст.м3/сут) как функция давления — PVT учитывается на каждом узле */
+  qGasFreeAtP: (pAtma: number, tC: number) => number;
+  /** свойства жидкости (пласт. усл.) как функция давления */
+  liquidAtP: (pAtma: number, tC: number) => { rhoKgm3: number; muCP: number };
+  /** относительная плотность газа (воздух=1) */
   gammaGas: number;
   /** температура, °C, как функция глубины (от поверхности) */
   tAtDepthC: (z: number) => number;
   /** Z-корреляция */
   zCorrelation: "bb" | "dranchuk" | "kareem";
+  /** поверхностное натяжение жидкость-газ, Н/м (можно константой) */
+  sigmaNm?: number;
   /** число сегментов */
   nSeg?: number;
 }
@@ -111,41 +112,47 @@ export interface TraverseNode {
   dpdzAtmaM: number;
 }
 
+const P_FLOOR_ATMA = 0.9;
+
 /**
  * Марш давления от zBottom вверх до zTop (восходящий поток). Явный Эйлер по сегментам.
  * Градиент: гидростатика (alpha-взвешенная плотность) + трение Дарси-Вейсбаха
- * по смесевой скорости (порт computeProfile из sand_transport, без твёрдой фазы).
+ * по смесевой скорости (порт computeProfile из sand_transport).
+ * При vsl = 0 даёт барботаж газа через неподвижную жидкость.
  */
 export function traverseUp(inp: TraverseInput): TraverseNode[] {
   const nSeg = inp.nSeg ?? 100;
   const dz = (inp.zBottomM - inp.zTopM) / nSeg;
   const area = (Math.PI * inp.dM * inp.dM) / 4;
+  const sigma = inp.sigmaNm ?? 0.03;
   const nodes: TraverseNode[] = [];
 
   let p = inp.pBottomAtma;
   let z = inp.zBottomM;
-  const flowing = inp.qLiqSm3day > 0 || inp.qGasFreeSm3day > 0;
 
   for (let i = 0; i <= nSeg; i++) {
     const tC = inp.tAtDepthC(z);
+    const liq = inp.liquidAtP(p, tC);
+    const qGas = Math.max(0, inp.qGasFreeAtP(p, tC));
     const tK = tC + 273.0;
     const pMPa = p * 0.101325;
     const zFac = zGas(tK, pMPa, inp.gammaGas, inp.zCorrelation);
     const bg = (0.00034722 * tK * zFac) / pMPa;
     const rhoGas = (inp.gammaGas * 1.2217) / bg;
-    const qGasRc = inp.qGasFreeSm3day * bg;
+    const qGasRc = qGas * bg;
 
-    const vsl = flowing ? (inp.qLiqSm3day * M3DAY_TO_M3SEC) / area : 0;
-    const vsg = flowing ? (qGasRc * M3DAY_TO_M3SEC) / area : 0;
+    const vsl = (inp.qLiqSm3day * M3DAY_TO_M3SEC) / area;
+    const vsg = (qGasRc * M3DAY_TO_M3SEC) / area;
+    const flowing = vsl > 1e-9 || vsg > 1e-9;
 
-    const df = driftFlux(vsl, vsg, inp.dM, inp.rhoLiqKgm3, rhoGas, 0.03);
-    const rhoMix = df.alpha * rhoGas + (1 - df.alpha) * inp.rhoLiqKgm3;
+    const df = driftFlux(vsl, vsg, inp.dM, liq.rhoKgm3, rhoGas, sigma);
+    const rhoMix = df.alpha * rhoGas + (1 - df.alpha) * liq.rhoKgm3;
 
     // градиент давления, Па/м
     const dpdzGrav = rhoMix * G;
     let dpdzFric = 0;
     if (flowing && df.vm > 1e-6) {
-      const muMix = (1 - df.alpha) * inp.muLiqCP * 1e-3 + df.alpha * 1e-5; // Па·с, газ ~0.01 сП
+      const muMix = (1 - df.alpha) * liq.muCP * 1e-3 + df.alpha * 1e-5; // Па·с, газ ~0.01 сП
       const re = Math.max(1, (rhoMix * df.vm * inp.dM) / Math.max(muMix, 1e-5));
       const f = frictionFactor(re);
       dpdzFric = (f * rhoMix * df.vm * df.vm) / (2 * inp.dM);
@@ -157,60 +164,32 @@ export function traverseUp(inp: TraverseInput): TraverseNode[] {
     });
 
     // шаг вверх: давление падает
-    p = Math.max(0.9, p - dpdz * dz);
+    p = Math.max(P_FLOOR_ATMA, p - dpdz * dz);
     z -= dz;
   }
   return nodes;
 }
 
 /**
- * Обратный марш: давление на нижней границе участка по известному давлению сверху
- * (спуск по НКТ от устья вниз). Используется для построения VLP-профиля от устья.
+ * Спуск от известного давления сверху (газовая шапка/колонна газа) вниз через газ
+ * до глубины zBottom: давление растёт по весу газа.
  */
-export function traverseDownFromTop(inp: Omit<TraverseInput, "pBottomAtma"> & { pTopAtma: number }): TraverseNode[] {
-  // порядок узлов от верха к низу, интегрирование вниз
-  const nSeg = inp.nSeg ?? 100;
-  const dz = (inp.zBottomM - inp.zTopM) / nSeg;
-  const area = (Math.PI * inp.dM * inp.dM) / 4;
-  const nodes: TraverseNode[] = [];
-
-  let p = inp.pTopAtma;
-  let z = inp.zTopM;
-  const flowing = inp.qLiqSm3day > 0 || inp.qGasFreeSm3day > 0;
-
-  for (let i = 0; i <= nSeg; i++) {
-    const tC = inp.tAtDepthC(z);
-    const tK = tC + 273.0;
+export function gasColumnDown(pTopAtma: number, zTopM: number, zBottomM: number,
+  gammaGas: number, zCorrelation: "bb" | "dranchuk" | "kareem",
+  tAtDepthC: (z: number) => number, nSeg = 20): number {
+  if (zBottomM <= zTopM) return pTopAtma;
+  const dz = (zBottomM - zTopM) / nSeg;
+  let p = pTopAtma;
+  for (let i = 0; i < nSeg; i++) {
+    const zMid = zTopM + dz * (i + 0.5);
+    const tK = tAtDepthC(zMid) + 273.0;
     const pMPa = p * 0.101325;
-    const zFac = zGas(tK, pMPa, inp.gammaGas, inp.zCorrelation);
+    const zFac = zGas(tK, pMPa, gammaGas, zCorrelation);
     const bg = (0.00034722 * tK * zFac) / pMPa;
-    const rhoGas = (inp.gammaGas * 1.2217) / bg;
-    const qGasRc = inp.qGasFreeSm3day * bg;
-
-    const vsl = flowing ? (inp.qLiqSm3day * M3DAY_TO_M3SEC) / area : 0;
-    const vsg = flowing ? (qGasRc * M3DAY_TO_M3SEC) / area : 0;
-
-    const df = driftFlux(vsl, vsg, inp.dM, inp.rhoLiqKgm3, rhoGas, 0.03);
-    const rhoMix = df.alpha * rhoGas + (1 - df.alpha) * inp.rhoLiqKgm3;
-
-    const dpdzGrav = rhoMix * G;
-    let dpdzFric = 0;
-    if (flowing && df.vm > 1e-6) {
-      const muMix = (1 - df.alpha) * inp.muLiqCP * 1e-3 + df.alpha * 1e-5;
-      const re = Math.max(1, (rhoMix * df.vm * inp.dM) / Math.max(muMix, 1e-5));
-      const f = frictionFactor(re);
-      dpdzFric = (f * rhoMix * df.vm * df.vm) / (2 * inp.dM);
-    }
-    const dpdz = (dpdzGrav + dpdzFric) / 101325; // atma/м
-    nodes.push({
-      zM: z, pAtma: p, tC, alpha: df.alpha, vm: df.vm, vsl, vsg,
-      rhoMixKgm3: rhoMix, regime: df.regime, dpdzAtmaM: dpdz,
-    });
-
-    p += dpdz * dz;
-    z += dz;
+    const rhoGas = (gammaGas * 1.2217) / bg;
+    p += (rhoGas * G * dz) / 101325;
   }
-  return nodes;
+  return p;
 }
 
 /** Линейная интерполяция давления профиля на произвольной глубине (направление любое). */

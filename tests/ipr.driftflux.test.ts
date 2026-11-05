@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import { buildIprCurve, vogelPwfAtma, vogelQLiqSm3day } from "../src/core/ipr.js";
-import { classifyRegime, driftFlux, frictionFactor, pressureAtDepth, traverseUp } from "../src/core/driftflux.js";
+import { classifyRegime, driftFlux, frictionFactor, gasColumnDown, pressureAtDepth, traverseUp } from "../src/core/driftflux.js";
 
 const saturated: Parameters<typeof vogelQLiqSm3day>[1] = {
   pResAtma: 200, pbAtma: 0, qTestSm3day: 100, pTestAtma: 150, fwPerc: 0,
@@ -91,6 +91,8 @@ describe("Drift-flux замыкания", () => {
 
 describe("Марш давления (traverseUp)", () => {
   const tGeo = (z: number) => 5 + (3 * z) / 100;
+  const liqConst = (rho: number, mu: number) => () => ({ rhoKgm3: rho, muCP: mu });
+  const gasConst = (q: number) => () => q;
 
   it("давление падает вверх, верх ниже низа", () => {
     const nodes = traverseUp({
@@ -99,9 +101,8 @@ describe("Марш давления (traverseUp)", () => {
       zTopM: 0,
       dM: 0.062,
       qLiqSm3day: 80,
-      qGasFreeSm3day: 1000,
-      rhoLiqKgm3: 900,
-      muLiqCP: 2,
+      qGasFreeAtP: gasConst(1000),
+      liquidAtP: liqConst(900, 2),
       gammaGas: 0.7,
       tAtDepthC: tGeo,
       zCorrelation: "kareem",
@@ -122,28 +123,33 @@ describe("Марш давления (traverseUp)", () => {
       zTopM: 0,
       dM: 0.15,
       qLiqSm3day: 0,
-      qGasFreeSm3day: 2000,
-      rhoLiqKgm3: 1000,
-      muLiqCP: 1,
+      qGasFreeAtP: gasConst(2000),
+      liquidAtP: liqConst(1000, 1),
       gammaGas: 0.7,
       tAtDepthC: tGeo,
       zCorrelation: "kareem",
       nSeg: 50,
     });
-    // перепад давления меньше чисто жидкой гидростатики из-за пузырьков
-    const dp = nodes[nodes.length - 1] === undefined ? 0 : nodes[nodes.length - 1].pAtma;
-    expect(100 - dp).toBeGreaterThan(0);
-    expect(100 - dp).toBeLessThan(1000 * 1000 * 9.80665 / 101325); // < чистой жидкости
+    const dp = 100 - nodes[nodes.length - 1].pAtma;
+    expect(dp).toBeGreaterThan(0);
+    // перепад меньше чисто жидкой гидростатики (~94 атм на 1000 м при 1000 кг/м3)
+    expect(dp).toBeLessThan(1000 * 1000 * 9.80665 / 101325);
   });
 
   it("интерполяция давления по профилю", () => {
     const nodes = traverseUp({
       pBottomAtma: 100, zBottomM: 1000, zTopM: 0, dM: 0.062,
-      qLiqSm3day: 50, qGasFreeSm3day: 0, rhoLiqKgm3: 1000, muLiqCP: 1,
+      qLiqSm3day: 50, qGasFreeAtP: gasConst(0), liquidAtP: liqConst(1000, 1),
       gammaGas: 0.7, tAtDepthC: tGeo, zCorrelation: "kareem", nSeg: 100,
     });
     const p500 = pressureAtDepth(nodes, 500);
     expect(p500).toBeGreaterThan(nodes[nodes.length - 1].pAtma); // выше верха, но ниже низа
     expect(p500).toBeLessThan(100);
+  });
+
+  it("вес газовой колонны (gasColumnDown) положителен и мал", () => {
+    const pBottom = gasColumnDown(10, 0, 1000, 0.7, "kareem", tGeo, 20);
+    expect(pBottom).toBeGreaterThan(10);
+    expect(pBottom - 10).toBeLessThan(5);
   });
 });
