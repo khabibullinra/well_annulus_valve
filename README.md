@@ -35,7 +35,8 @@
 
 Проект опирается на два открытых репозитория:
 
-- **[unfpy](https://github.com/khabibullinra/unfpy)** — Python-порт uniflocVBA 7.58.
+- **unfpy** — Python-порт uniflocVBA 7.58 (локальный репозиторий
+  `/Users/rnt/Projects/well/unfpy`, развивается из VBA-библиотеки unifloc 7.58).
   Взяты формулы и структура: PVT-корреляции Стоунда с калибровкой по пользовательским
   Pнас/Bo/μob, Beggs-Robinson, Vasquez-Beggs, Z-факторы (Kareem/DAK/Brill-Beggs),
   Lee, McCain (вода), модификация флюида после сепарации
