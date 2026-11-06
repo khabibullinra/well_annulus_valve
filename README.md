@@ -35,8 +35,7 @@
 
 Проект опирается на два открытых репозитория:
 
-- **unfpy** — Python-порт uniflocVBA 7.58 (локальный репозиторий
-  `/Users/rnt/Projects/well/unfpy`, развивается из VBA-библиотеки unifloc 7.58).
+- **[unfpy](https://gitverse.ru/khabibullinra/unfpy)** — Python-порт uniflocVBA 7.58.
   Взяты формулы и структура: PVT-корреляции Стоунда с калибровкой по пользовательским
   Pнас/Bo/μob, Beggs-Robinson, Vasquez-Beggs, Z-факторы (Kareem/DAK/Brill-Beggs),
   Lee, McCain (вода), модификация флюида после сепарации
@@ -45,7 +44,7 @@
   композитный IPR Вогеля, узловое согласование бисекцией. Каталог из 43 реальных
   насосов ЭЦН перенесён из БД unfpy (`unfpy/data/esp_db.json`); эталонные JSON из
   `unfpy/tests/reference/pvt_correlations` используются как паритет-тесты.
-- **sand_transport** (локальный проект, `/Users/rnt/Projects/well/sand_transport`) —
+- **[sand_transport](https://gitverse.ru/khabibullinra/sand_transport)** —
   drift-flux модель многофазного потока: Zuber–Findlay в явной форме
   α = vsg/(C0·vm + vd), режимы пузырьковый/снарядный/churn/кольцевой с замыканиями
   Harmathy/Тейлора, гидростатика + трение Дарси-Вейсбаха, явный Эйлер по сегментам.
