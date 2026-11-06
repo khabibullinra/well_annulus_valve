@@ -227,6 +227,7 @@ const f2 = (x: number): string => (isFinite(x) ? x.toFixed(2) : "—");
 const f3 = (x: number): string => (isFinite(x) ? x.toFixed(3) : "—");
 
 function renderSummary(v: WellSolution, open: WellSolution, closed: WellSolution): void {
+  const p = lastParams;
   const banner = document.getElementById("status-banner")!;
   if (!v.ok) {
     banner.className = "banner bad";
@@ -245,6 +246,10 @@ function renderSummary(v: WellSolution, open: WellSolution, closed: WellSolution
     return `${d >= 0 ? "+" : ""}${f1(d)}`;
   };
 
+  // дельты «с клапаном» против базы А (без клапана, задвижка открыта)
+  const dOilT = (v.qOilSm3day - open.qOilSm3day) * (p?.gammaOil ?? 0.86); // т/сут (ρ ст. нефти = γo·1000 кг/м3)
+  const dEnergy = ((v.powerElectricW - open.powerElectricW) / 1000) * 24; // кВт·ч/сут
+
   document.getElementById("summary-cards")!.innerHTML = `
     <div class="card"><div class="k">Дебит жидкости</div><div class="v">${f1(v.qLiqSm3day)} <span class="u">м3/сут</span></div>
       <div class="s">база А: ${f1(open.qLiqSm3day)} (${cmp(v.qLiqSm3day, open.qLiqSm3day)})</div></div>
@@ -262,6 +267,10 @@ function renderSummary(v: WellSolution, open: WellSolution, closed: WellSolution
       <div class="s">${v.valveCritical ? "клапан — критический режим" : "клапан — докритический режим"}</div></div>
     <div class="card"><div class="k">P_затр расч. / устье затр.</div><div class="v">${f1(v.pCasAtma)} <span class="u">атм</span></div>
       <div class="s">уровень в затрубе: ${v.liquidLevelM != null ? f0(v.liquidLevelM) + " м" : "жидкость до устья"}${v.gasAtIntake ? " ⚠ газ у приёма" : ""}</div></div>
+    <div class="card red"><div class="k">Δ нефти (клапан − база А)</div><div class="v">${dOilT >= 0 ? "+" : ""}${dOilT.toFixed(2)} <span class="u">т/сут</span></div>
+      <div class="s">${f1(v.qOilSm3day)} − ${f1(open.qOilSm3day)} м3/сут × ρ=${f2((p?.gammaOil ?? 0.86) * 1000)} кг/м3</div></div>
+    <div class="card red"><div class="k">Δ энергии (клапан − база А)</div><div class="v">${dEnergy >= 0 ? "+" : ""}${dEnergy.toFixed(1)} <span class="u">кВт·ч/сут</span></div>
+      <div class="s">(${f1(v.powerElectricW / 1000)} − ${f1(open.powerElectricW / 1000)}) кВт × 24 ч</div></div>
   `;
 }
 
