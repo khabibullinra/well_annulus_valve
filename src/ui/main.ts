@@ -1,7 +1,7 @@
 // UI приложения: панель параметров, графики, сводка, ручной и автоматический режимы.
 
 import pumpsData from "../data/pumps.json";
-import { drawLineChart, type Series, type Marker } from "./charts.js";
+import { drawLineChart, drawTripleAxisChart, type Series, type Marker } from "./charts.js";
 import type { PumpDbRecord } from "../core/esp.js";
 import { EspPump, polyfitDeg2 } from "../core/esp.js";
 import {
@@ -493,43 +493,66 @@ function drawPump(): void {
   const pumpRes = lastSolution.pump;
   const b = db.freqHz / p.freqHz;
   const qMax = (db.rateMax * p.freqHz) / db.freqHz;
-  const qs: number[] = [], heads: number[] = [], headsGas: number[] = [], powers: number[] = [], effs: number[] = [];
   const stages = p.stageNum;
-  const gc = v.gasCorr;
+  const gc = Math.max(v.gasCorr, 0);
   const rhoMixRef = pumpRes.rhoMixIntakeKgm3 || 900;
+
+  const qs: number[] = [], headW: number[] = [], headG: number[] = [];
+  const powWkW: number[] = [], powGkW: number[] = [];
+  const effW: number[] = [], effG: number[] = [];
   for (let i = 0; i <= 60; i++) {
     const q = (qMax * 1.02 * i) / 60;
     const h1 = curveAt(db.ratePoints, db.headPoints, q * b);
-    const pw = curveAt(db.ratePoints, db.powerPoints, q * b);
-    const ef = curveAt(db.ratePoints, db.effPoints, q * b);
+    const pw1 = curveAt(db.ratePoints, db.powerPoints, q * b);
+    const ef1 = Math.max(0, curveAt(db.ratePoints, db.effPoints, q * b));
+    const hw = b ** -2 * stages * h1;
+    const pww = b ** -3 * stages * pw1;
     qs.push(q);
-    heads.push(b ** -2 * stages * h1);
-    headsGas.push(b ** -2 * stages * h1 * Math.max(gc, 0));
-    powers.push(1000 * b ** -3 * stages * pw * rhoMixRef / 1000);
-    effs.push(Math.max(0, ef));
+    headW.push(hw);
+    headG.push(hw * gc);
+    powWkW.push(pww);
+    powGkW.push(pww * rhoMixRef / 1000);
+    effW.push(ef1);
+    effG.push(ef1 * gc);
   }
-  const op = pumpRes;
-  drawLineChart({
-    canvas: document.getElementById("chart-pump-head") as HTMLCanvasElement,
-    xLabel: "Расход смеси, м3/сут", yLabel: "Напор, м",
+
+  const note =
+    `Характеристики скорректированы под скважинные условия: P_приёма = ${f1(v.pIntakeAtma)} атм, ` +
+    `T = ${f1(pumpRes.tIntakeC)} °C, деградация по газу ×${f2(gc)} (ГСФ на приёме ${(v.gasFracIntake * 100).toFixed(1)}%), ` +
+    `смесь ρ=${f0(rhoMixRef)} кг/м3. Пунктир — номинал (вода), сплошная — по которым ведётся расчёт.`;
+
+  drawTripleAxisChart({
+    canvas: document.getElementById("chart-pump-catalog") as HTMLCanvasElement,
+    xLabel: "Расход смеси, м3/сут",
+    axisLabels: ["Напор, м", "Мощность, кВт", "КПД, д.е."],
+    note,
     series: [
-      { xs: qs, ys: heads, color: "#1565c0", label: `напор ${stages} ступ. (вода)` },
-      { xs: qs, ys: headsGas, color: "#8e24aa", label: `с деградацией ×${f2(gc)}`, dashed: true },
+      { xs: qs, ys: headW, color: "#1565c0", dashed: true, axis: 0, label: "Напор — номинал (вода)" },
+      { xs: qs, ys: headG, color: "#1565c0", axis: 0, label: "Напор — расчёт (× деградация)", widthPx: 2.6 },
+      { xs: qs, ys: powWkW, color: "#c62828", dashed: true, axis: 1, label: "Мощность — номинал (вода)" },
+      { xs: qs, ys: powGkW, color: "#c62828", axis: 1, label: "Мощность — расчёт (× ρ смеси)", widthPx: 2.6 },
+      { xs: qs, ys: effW, color: "#2e7d32", dashed: true, axis: 2, label: "КПД — номинал" },
+      { xs: qs, ys: effG, color: "#2e7d32", axis: 2, label: "КПД — расчёт (× деградация)", widthPx: 2.6 },
     ],
-    markers: [{ x: op.qMixRcM3day, y: op.headM, color: "#e65100", label: "рабочая точка" }],
+    markers: [
+      { x: pumpRes.qMixRcM3day, y: pumpRes.headM, color: "#e65100", axis: 0 },
+      { x: pumpRes.qMixRcM3day, y: pumpRes.powerShaftW / 1000, color: "#e65100", axis: 1 },
+      {
+        x: pumpRes.qMixRcM3day, y: pumpRes.effD, color: "#e65100", axis: 2,
+        label: "раб. точка", labelDy: -10,
+      },
+    ],
   });
-  drawLineChart({
-    canvas: document.getElementById("chart-pump-power") as HTMLCanvasElement,
-    xLabel: "Расход смеси, м3/сут", yLabel: "Мощность, кВт",
-    series: [{ xs: qs, ys: powers.map((w) => w / 1000), color: "#c62828", label: "мощность (вал)" }],
-    markers: [{ x: op.qMixRcM3day, y: op.powerShaftW / 1000, color: "#e65100", label: "рабочая точка" }],
-  });
-  drawLineChart({
-    canvas: document.getElementById("chart-pump-eff") as HTMLCanvasElement,
-    xLabel: "Расход смеси, м3/сут", yLabel: "КПД, д.е.",
-    series: [{ xs: qs, ys: effs, color: "#2e7d32", label: "КПД по кривой" }],
-    markers: [{ x: op.qMixRcM3day, y: op.effD, color: "#e65100", label: `КПД факт. ${f2(op.effD)}` }],
-  });
+
+  document.getElementById("pump-note-detail")!.innerHTML =
+    `<table class="kv">
+      <tr><td>Насос / ступеней / частота</td><td>${db.id} / ${stages} / ${p.freqHz} Гц (кривая БД ${db.freqHz} Гц)</td>
+          <td>Расход смеси через насос</td><td>${f1(pumpRes.qMixRcM3day)} м3/сут</td></tr>
+      <tr><td>Напор суммарный (расч.)</td><td>${f0(pumpRes.headM)} м (${f2(pumpRes.headM / stages)} м/ступ)</td>
+          <td>Мощность на валу / эл.</td><td>${f1(pumpRes.powerShaftW / 1000)} / ${f1(v.powerElectricW / 1000)} кВт</td></tr>
+      <tr><td>КПД насоса (расч.)</td><td>${f2(pumpRes.effD)}</td>
+          <td>Деградация по газу</td><td>×${f2(gc)} при ГСФ ${(v.gasFracIntake * 100).toFixed(1)}%</td></tr>
+    </table>`;
 }
 
 /** Оценка кривой насоса полиномом deg-2 (как в EspPump). */
