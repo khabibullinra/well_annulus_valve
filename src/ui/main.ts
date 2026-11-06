@@ -289,7 +289,18 @@ function drawProfiles(): void {
   });
   const series: Series[] = [];
   if (tubing.length > 1) series.push(mkSeries(tubing, "#1565c0", "НКТ"));
-  if (prof.annulus.length > 1) series.push(mkSeries(prof.annulus, "#2e7d32", "затруб"));
+  // затруб: две части — газовая шапка (барометрика, сплошная) и барботаж через жидкость (пунктир)
+  if (prof.annulus.length > 1) {
+    const lv = v.liquidLevelM;
+    if (lv != null) {
+      const gasPart = prof.annulus.filter((n) => n.zM <= lv + 1e-6);
+      const liqPart = prof.annulus.filter((n) => n.zM >= lv - 1e-6);
+      if (gasPart.length > 1) series.push(mkSeries(gasPart, "#2e7d32", "затруб: газовая шапка"));
+      if (liqPart.length > 1) series.push({ ...mkSeries(liqPart, "#66bb6a", "затруб: барботаж"), dashed: true });
+    } else {
+      series.push(mkSeries(prof.annulus, "#2e7d32", "затруб (барботаж)"));
+    }
+  }
   if (prof.belowPump.length > 1) series.push(mkSeries(prof.belowPump, "#6a1b9a", "ниже насоса"));
 
   drawLineChart({

@@ -133,6 +133,39 @@ describe("Затруб: барботаж и уровень", () => {
     // при уровне выше клапана давление на клапане больше верхнего
     expect(r.pAtValveAnnAtma).toBeGreaterThan(30);
   });
+
+  it("профиль затруба двухчастный: барометрическая шапка + барботаж, стык на уровне", () => {
+    const r = solveAnnulus({
+      pIntakeAtma: 100, hEspM: 1500, hValveM: 1000,
+      qGasSepSm3day: 3000, qGasValveSm3day: 1500,
+      dCasingM: 0.13, dTubingOdM: 0.073, gammaGas: 0.7, zCorrelation: "kareem",
+      tAtDepthC: tGeo, liquidAtP: liquid, nSeg: 40,
+    }, 30);
+    // профиль построен, идёт сверху вниз от устья до приёма
+    expect(r.nodes.length).toBeGreaterThan(5);
+    expect(r.nodes[0].zM).toBe(0);
+    expect(r.nodes[0].pAtma).toBeCloseTo(30, 3); // устье = заданное P_затр
+    const last = r.nodes[r.nodes.length - 1];
+    expect(last.zM).toBeGreaterThan(1499);
+    expect(last.pAtma).toBeCloseTo(100, 1); // низ стыкуется с приёмом
+    // монотонный рост давления с глубиной
+    for (let i = 1; i < r.nodes.length; i++) {
+      expect(r.nodes[i].pAtma).toBeGreaterThanOrEqual(r.nodes[i - 1].pAtma - 1e-9);
+      expect(r.nodes[i].zM).toBeGreaterThanOrEqual(r.nodes[i - 1].zM - 1e-9);
+    }
+    // выше уровня — газ (alpha ≈ 1), ниже — жидкость с пузырьками (alpha < 1)
+    const lv = r.liquidLevelM!;
+    const gasNodes = r.nodes.filter((n) => n.zM < lv - 1e-6);
+    const liqNodes = r.nodes.filter((n) => n.zM > lv + 1);
+    expect(gasNodes.length).toBeGreaterThan(0);
+    expect(liqNodes.length).toBeGreaterThan(0);
+    for (const n of gasNodes) expect(n.alpha).toBeGreaterThan(0.99);
+    for (const n of liqNodes) expect(n.alpha).toBeLessThan(0.9);
+    // излом на уровне: градиент газа много меньше градиента жидкости
+    const pAtLv = r.nodes.find((n) => Math.abs(n.zM - lv) < 1e-6)!.pAtma;
+    expect(pAtLv).toBeGreaterThan(30);
+    expect(100 - pAtLv).toBeGreaterThan((pAtLv - 30) * 2); // жидкий столб весомей газового
+  });
 });
 
 describe("Сценарий В: клапан", () => {

@@ -90,7 +90,9 @@ function traverseUpN(
  *  - pCasGivenAtma === null: жидкость заполняет затруб, верхнее давление — расчётное
  *    (равновесие закрытой задвижки: весь газ уходит в клапан или копится).
  *  - pCasGivenAtma задано: ищется уровень жидкости (бисекция) из согласования
- *    давления на приёме.
+ *    давления на приёме. Профиль двухчастный:
+ *    * верх — газовая шапка по барометрической формуле (вес газовой колонны);
+ *    * низ — барботаж газа через столб неподвижной жидкости (drift-flux, vsl=0).
  */
 export function solveAnnulus(inp: AnnulusInput, pCasGivenAtma: number | null): AnnulusResult {
   const qValve = inp.qGasValveSm3day;
@@ -105,7 +107,7 @@ export function solveAnnulus(inp: AnnulusInput, pCasGivenAtma: number | null): A
       pCasCalcAtma: up.pTopAtma,
       liquidLevelM: null,
       gasAtIntake: false,
-      nodes: up.nodes,
+      nodes: [...up.nodes].reverse(), // сверху вниз для единообразия графиков
       pAtValveAnnAtma: pAtValve,
     };
   }
@@ -115,14 +117,98 @@ export function solveAnnulus(inp: AnnulusInput, pCasGivenAtma: number | null): A
   const gasCol = (hLl: number) =>
     gasColumnDown(pCasGivenAtma, 0, hLl, inp.gammaGas, inp.zCorrelation, inp.tAtDepthC, 10);
 
-  // жидкостный марш вниз от уровня до глубины hTo (по умолчанию — приём насоса);
-  // возвращает давление на глубине hTo
-  const marchDownFromLevel = (hLl: number, hToIn?: number): number => {
+  // --- узлы газовой шапки (барометрическая формула) ---
+  const gasNode = (z: number, p: number): TraverseNode => {
+    const tC = inp.tAtDepthC(z);
+    const tK = tC + 273.0;
+    const pMPa = Math.max(p, 0.9) * 0.101325;
+    const zFac = zGas(tK, pMPa, inp.gammaGas, inp.zCorrelation);
+    const bg = (0.00034722 * tK * zFac) / pMPa;
+    const rhoGas = (inp.gammaGas * 1.2217) / bg;
+    return {
+      zM: z, pAtma: p, tC, alpha: 1, vm: 0, vsl: 0, vsg: 0,
+      rhoMixKgm3: rhoGas, regime: "annular", dpdzAtmaM: (rhoGas * G) / 101325,
+    };
+  };
+  const gasCapNodes = (hBottom: number, nSeg = 20): TraverseNode[] => {
+    const out: TraverseNode[] = [];
+    if (hBottom <= 1e-9) return out;
+    const dz = hBottom / nSeg;
+    let p = pCasGivenAtma;
+    out.push(gasNode(0, p));
+    for (let i = 0; i < nSeg; i++) {
+      const zMid = dz * (i + 0.5);
+      const tK = inp.tAtDepthC(zMid) + 273.0;
+      const pMPa = Math.max(p, 0.9) * 0.101325;
+      const zFac = zGas(tK, pMPa, inp.gammaGas, inp.zCorrelation);
+      const bg = (0.00034722 * tK * zFac) / pMPa;
+      const rhoGas = (inp.gammaGas * 1.2217) / bg;
+      p += (rhoGas * G * dz) / 101325;
+      out.push(gasNode(dz * (i + 1), p));
+    }
+    return out;
+  };
+
+  // --- узлы барботажа в жидкостном столбе (drift-flux при vsl=0) ---
+  const area = annulusAreaM2(inp.dCasingM, inp.dTubingOdM);
+  const sigma = inp.sigmaNm ?? 0.03;
+  const liquidNode = (z: number, p: number): TraverseNode => {
+    const tC = inp.tAtDepthC(z);
+    const liq = inp.liquidAtP(p, tC);
+    const qGasSt = valveSubmergedPossible
+      ? (z > inp.hValveM! ? inp.qGasSepSm3day : Math.max(0, inp.qGasSepSm3day - qValve))
+      : inp.qGasSepSm3day;
+    const tK = tC + 273.0;
+    const pMPa = Math.max(p, 0.9) * 0.101325;
+    const zFac = zGas(tK, pMPa, inp.gammaGas, inp.zCorrelation);
+    const bg = (0.00034722 * tK * zFac) / pMPa;
+    const rhoGas = (inp.gammaGas * 1.2217) / bg;
+    const vsg = ((qGasSt * bg) * (1 / 86400)) / area;
+    const df = driftFlux(0, vsg, Math.max(inp.dCasingM - inp.dTubingOdM, 0.01), liq.rhoKgm3, rhoGas, sigma);
+    const rhoMix = df.alpha * rhoGas + (1 - df.alpha) * liq.rhoKgm3;
+    return {
+      zM: z, pAtma: p, tC, alpha: df.alpha, vm: 0, vsl: 0, vsg,
+      rhoMixKgm3: rhoMix, regime: df.regime, dpdzAtmaM: (rhoMix * G) / 101325,
+    };
+  };
+
+  // жидкостный марш вниз от уровня до приёма насоса с записью узлов профиля
+  const marchDownFromLevel = (hLl: number): TraverseNode[] => {
     const nSeg = inp.nSeg ?? 60;
-    const area = annulusAreaM2(inp.dCasingM, inp.dTubingOdM);
-    const sigma = inp.sigmaNm ?? 0.03;
     let p = gasCol(hLl);
-    const hFrom = hLl, hTo = Math.min(hToIn ?? inp.hEspM, inp.hEspM);
+    const hFrom = hLl, hTo = inp.hEspM;
+    const out: TraverseNode[] = [liquidNode(hFrom, p)];
+    if (hTo <= hFrom) return out;
+    const n = Math.max(2, Math.round((nSeg * (hTo - hFrom)) / Math.max(inp.hEspM, 1)));
+    const dz = (hTo - hFrom) / n;
+    let z = hFrom;
+    for (let i = 0; i < n; i++) {
+      const zMid = z + dz / 2;
+      const tC = inp.tAtDepthC(zMid);
+      const liq = inp.liquidAtP(p, tC);
+      const qGasSt = valveSubmergedPossible
+        ? (zMid > inp.hValveM! ? inp.qGasSepSm3day : Math.max(0, inp.qGasSepSm3day - qValve))
+        : inp.qGasSepSm3day;
+      const tK = tC + 273.0;
+      const pMPa = Math.max(p, 0.9) * 0.101325;
+      const zFac = zGas(tK, pMPa, inp.gammaGas, inp.zCorrelation);
+      const bg = (0.00034722 * tK * zFac) / pMPa;
+      const rhoGas = (inp.gammaGas * 1.2217) / bg;
+      const vsg = ((qGasSt * bg) * (1 / 86400)) / area;
+      const df = driftFlux(0, vsg, Math.max(inp.dCasingM - inp.dTubingOdM, 0.01), liq.rhoKgm3, rhoGas, sigma);
+      const rhoMix = df.alpha * rhoGas + (1 - df.alpha) * liq.rhoKgm3;
+      p += (rhoMix * G * dz) / 101325;
+      z += dz;
+      out.push(liquidNode(z, p));
+    }
+    return out;
+  };
+
+  // давление на приёме при заданном уровне (без записи узлов — для бисекции)
+  const marchDownP = (hLl: number): number => {
+    const nSeg = inp.nSeg ?? 60;
+    let p = gasCol(hLl);
+    const hFrom = hLl, hTo = inp.hEspM;
     if (hTo <= hFrom) return p;
     const n = Math.max(2, Math.round((nSeg * (hTo - hFrom)) / Math.max(inp.hEspM, 1)));
     const dz = (hTo - hFrom) / n;
@@ -135,7 +221,7 @@ export function solveAnnulus(inp: AnnulusInput, pCasGivenAtma: number | null): A
         ? (zMid > inp.hValveM! ? inp.qGasSepSm3day : Math.max(0, inp.qGasSepSm3day - qValve))
         : inp.qGasSepSm3day;
       const tK = tC + 273.0;
-      const pMPa = p * 0.101325;
+      const pMPa = Math.max(p, 0.9) * 0.101325;
       const zFac = zGas(tK, pMPa, inp.gammaGas, inp.zCorrelation);
       const bg = (0.00034722 * tK * zFac) / pMPa;
       const rhoGas = (inp.gammaGas * 1.2217) / bg;
@@ -148,9 +234,8 @@ export function solveAnnulus(inp: AnnulusInput, pCasGivenAtma: number | null): A
     return p;
   };
 
-  // граничные случаи: marchDownFromLevel(0) = заданное P_cas + полный жидкостный столб
-  const pFullLiquid = marchDownFromLevel(0);
-  if (pFullLiquid <= inp.pIntakeAtma) {
+  const pFullLiquidP = marchDownP(0);
+  if (pFullLiquidP <= inp.pIntakeAtma) {
     // даже полный столб жидкости не даёт давления приёма — шапки нет, верхнее давление выше заданного
     const up = marchUp(inp, qValve);
     const pAtValve = valveSubmergedPossible ? interpPressure(up.nodes, inp.hValveM!) : up.pTopAtma;
@@ -158,20 +243,22 @@ export function solveAnnulus(inp: AnnulusInput, pCasGivenAtma: number | null): A
       pCasCalcAtma: up.pTopAtma,
       liquidLevelM: null,
       gasAtIntake: false,
-      nodes: up.nodes,
+      nodes: [...up.nodes].reverse(),
       pAtValveAnnAtma: pAtValve,
     };
   }
 
   const pAllGas = gasCol(inp.hEspM);
   if (pAllGas >= inp.pIntakeAtma) {
-    // даже газовая колонна тяжелей приёма — уровень у приёма, газ в насос
+    // даже газовая колонна тяжелей приёма — уровень у приёма, газ в насос:
+    // весь ствол затруба — газовая шапка
+    const nodesAllGas = gasCapNodes(inp.hEspM, 20);
     return {
       pCasCalcAtma: pCasGivenAtma,
       liquidLevelM: inp.hEspM,
       gasAtIntake: true,
-      nodes: [],
-      pAtValveAnnAtma: gasCol(inp.hValveM ?? inp.hEspM),
+      nodes: nodesAllGas,
+      pAtValveAnnAtma: interpPressure(nodesAllGas, inp.hValveM ?? inp.hEspM),
     };
   }
 
@@ -180,38 +267,55 @@ export function solveAnnulus(inp: AnnulusInput, pCasGivenAtma: number | null): A
   const tolP = 0.005 * Math.max(inp.pIntakeAtma, 1);
   for (let i = 0; i < 30; i++) {
     const mid = 0.5 * (lo + hi);
-    const pMid = marchDownFromLevel(mid);
+    const pMid = marchDownP(mid);
     if (Math.abs(pMid - inp.pIntakeAtma) < tolP) { lo = hi = mid; break; }
     if (pMid > inp.pIntakeAtma) lo = mid;
     else hi = mid;
     if (hi - lo < 0.05) break;
   }
   const hLl = 0.5 * (lo + hi);
-  // давление на клапане: если клапан погружён (уровень выше клапана) — марш
-  // от уровня вниз ДО КЛАПАНА; иначе клапан в газовой шапке — вес газовой колонны
-  const pAtValve =
-    valveSubmergedPossible && hLl < inp.hValveM!
-      ? marchDownFromLevel(hLl, inp.hValveM!)
-      : gasCol(inp.hValveM ?? 0);
+
+  // профиль: шапка (барометрика) 0..hLl + барботаж hLl..приём
+  const capNodes = gasCapNodes(hLl, 20);
+  const liquidNodes = marchDownFromLevel(hLl);
+  const nodes = [...capNodes, ...liquidNodes.slice(1)];
+  if (nodes.length > 0) {
+    // нижний узел стыкуем с давлением приёма (та же физическая точка, что в НКТ-профиле)
+    nodes[nodes.length - 1].pAtma = inp.pIntakeAtma;
+  }
+  const pAtValve = interpPressure(nodes, inp.hValveM ?? 0);
   return {
     pCasCalcAtma: pCasGivenAtma,
     liquidLevelM: hLl,
     gasAtIntake: false,
-    nodes: [],
+    nodes,
     pAtValveAnnAtma: pAtValve,
   };
 }
 
 function interpPressure(nodes: TraverseNode[], z: number): number {
-  // профиль снизу вверх (z убывает по массиву)
-  if (nodes.length === 0) return NaN;
+  // направление массива любое (z растёт или убывает)
+  const n = nodes.length;
+  if (n === 0) return NaN;
+  const asc = nodes[0].zM < nodes[n - 1].zM;
+  if (asc) {
+    if (z <= nodes[0].zM) return nodes[0].pAtma;
+    if (z >= nodes[n - 1].zM) return nodes[n - 1].pAtma;
+    for (let i = 1; i < n; i++) {
+      if (z <= nodes[i].zM) {
+        const t = (z - nodes[i - 1].zM) / (nodes[i].zM - nodes[i - 1].zM);
+        return nodes[i - 1].pAtma + t * (nodes[i].pAtma - nodes[i - 1].pAtma);
+      }
+    }
+    return nodes[n - 1].pAtma;
+  }
   if (z >= nodes[0].zM) return nodes[0].pAtma;
-  if (z <= nodes[nodes.length - 1].zM) return nodes[nodes.length - 1].pAtma;
-  for (let i = 1; i < nodes.length; i++) {
+  if (z <= nodes[n - 1].zM) return nodes[n - 1].pAtma;
+  for (let i = 1; i < n; i++) {
     if (z >= nodes[i].zM) {
       const t = (nodes[i - 1].zM - z) / (nodes[i - 1].zM - nodes[i].zM);
       return nodes[i - 1].pAtma + t * (nodes[i].pAtma - nodes[i - 1].pAtma);
     }
   }
-  return nodes[nodes.length - 1].pAtma;
+  return nodes[n - 1].pAtma;
 }
