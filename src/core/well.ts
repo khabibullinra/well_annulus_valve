@@ -96,6 +96,8 @@ export interface WellSolution {
   gasAtIntake: boolean;
   pTubAtValveAtma: number;
   pAnnAtValveAtma: number;
+  /** давление в затрубе на глубине динамического уровня (устьевое + вес газовой шапки) */
+  pAnnAtLevelAtma: number | null;
   // ЭЦН
   pump: EspCalcResult | null;
   powerShaftW: number;
@@ -313,6 +315,7 @@ export function calcWellFromPwf(
     gasAtIntake: annulus?.gasAtIntake ?? false,
     pTubAtValveAtma: pTubAtValve,
     pAnnAtValveAtma: pAnnAtValve,
+    pAnnAtLevelAtma: annulus?.pAtLevelAnnAtma ?? null,
     pump,
     powerShaftW: pump.powerShaftW,
     powerElectricW,

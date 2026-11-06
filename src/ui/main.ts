@@ -214,7 +214,7 @@ function emptySolution(): WellSolution {
     qGasFreeIntakeSm3day: 0, qSepSm3day: 0, qValveSm3day: 0, qVentSm3day: 0,
     qGasTubingSm3day: 0, gasFracIntake: 0, gasCorr: 1, valveCritical: false,
     pCasAtma: 0, pCasEquilAtma: null, closedValveFeasible: false,
-    liquidLevelM: null, gasAtIntake: false, pTubAtValveAtma: 0, pAnnAtValveAtma: 0,
+    liquidLevelM: null, gasAtIntake: false, pTubAtValveAtma: 0, pAnnAtValveAtma: 0, pAnnAtLevelAtma: null,
     pump: null, powerShaftW: 0, powerElectricW: 0, specificEnergyKwhM3: 0, headM: 0,
     profiles: { belowPump: [], tubingBottom: [], tubing: [], annulus: [] }, tDisC: 0,
   };
@@ -313,7 +313,17 @@ function drawProfiles(): void {
     markers: [
       ...(p.valveEnabled ? [{ x: v.pAnnAtValveAtma, y: p.hValveM, color: "#e65100", label: `клапан ${f1(p.hValveM)} м` }] : []),
       { x: v.pIntakeAtma, y: p.hEspM, color: "#1565c0", label: `ЭЦН ${f0(p.hEspM)} м` },
-      ...(v.liquidLevelM != null ? [{ x: v.pCasAtma, y: v.liquidLevelM, color: "#2e7d32", label: `уровень ${f0(v.liquidLevelM)} м` }] : []),
+      // уровень: точка лежит НА линии затруба — x = P на уровне (устьевое + вес шапки)
+      ...(v.liquidLevelM != null
+        ? [{
+            x: v.pAnnAtLevelAtma ?? v.pCasAtma, y: v.liquidLevelM, color: "#2e7d32",
+            label: `уровень ${f0(v.liquidLevelM)} м, P=${f1(v.pAnnAtLevelAtma ?? v.pCasAtma)} атм`,
+          }]
+        : []),
+      // устьевое затрубное давление — верх газовой шапки, тоже на линии
+      ...(v.profiles.annulus.length > 1
+        ? [{ x: v.pCasAtma, y: 0, color: "#2e7d32", label: `P_затр ${f1(v.pCasAtma)} атм` }]
+        : []),
     ],
   });
 

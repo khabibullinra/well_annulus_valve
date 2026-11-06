@@ -30,6 +30,8 @@ export interface AnnulusResult {
   gasAtIntake: boolean; // уровень опустился к приёму — газ идёт в приём
   nodes: TraverseNode[]; // профиль затруба (от устья вниз или снизу вверх)
   pAtValveAnnAtma: number; // давление в затрубе на глубине клапана
+  /** давление в затрубе НА глубине уровня жидкости (P_затр устья + вес газовой шапки) */
+  pAtLevelAnnAtma: number | null;
 }
 
 /** Площадь кольцевого сечения затруба, м2. */
@@ -109,6 +111,7 @@ export function solveAnnulus(inp: AnnulusInput, pCasGivenAtma: number | null): A
       gasAtIntake: false,
       nodes: [...up.nodes].reverse(), // сверху вниз для единообразия графиков
       pAtValveAnnAtma: pAtValve,
+      pAtLevelAnnAtma: null,
     };
   }
 
@@ -245,6 +248,7 @@ export function solveAnnulus(inp: AnnulusInput, pCasGivenAtma: number | null): A
       gasAtIntake: false,
       nodes: [...up.nodes].reverse(),
       pAtValveAnnAtma: pAtValve,
+      pAtLevelAnnAtma: null,
     };
   }
 
@@ -259,6 +263,7 @@ export function solveAnnulus(inp: AnnulusInput, pCasGivenAtma: number | null): A
       gasAtIntake: true,
       nodes: nodesAllGas,
       pAtValveAnnAtma: interpPressure(nodesAllGas, inp.hValveM ?? inp.hEspM),
+      pAtLevelAnnAtma: interpPressure(nodesAllGas, inp.hEspM),
     };
   }
 
@@ -284,12 +289,15 @@ export function solveAnnulus(inp: AnnulusInput, pCasGivenAtma: number | null): A
     nodes[nodes.length - 1].pAtma = inp.pIntakeAtma;
   }
   const pAtValve = interpPressure(nodes, inp.hValveM ?? 0);
+  // давление НА уровне = низ газовой шапки (барометрика P_затр + вес газового столба)
+  const pAtLevel = interpPressure(nodes, hLl);
   return {
     pCasCalcAtma: pCasGivenAtma,
     liquidLevelM: hLl,
     gasAtIntake: false,
     nodes,
     pAtValveAnnAtma: pAtValve,
+    pAtLevelAnnAtma: pAtLevel,
   };
 }
 

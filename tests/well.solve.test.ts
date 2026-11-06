@@ -165,6 +165,11 @@ describe("Затруб: барботаж и уровень", () => {
     const pAtLv = r.nodes.find((n) => Math.abs(n.zM - lv) < 1e-6)!.pAtma;
     expect(pAtLv).toBeGreaterThan(30);
     expect(100 - pAtLv).toBeGreaterThan((pAtLv - 30) * 2); // жидкий столб весомей газового
+    // давление НА уровне учётывает барометрику шапки: pAtLevel > P_затр устья,
+    // и совпадает с узлом стыка
+    expect(r.pAtLevelAnnAtma).not.toBeNull();
+    expect(r.pAtLevelAnnAtma!).toBeCloseTo(pAtLv, 1);
+    expect(r.pAtLevelAnnAtma!).toBeGreaterThan(30 + 0.5); // вес газового столба > 0.5 атм на ~км
   });
 });
 
