@@ -1,7 +1,7 @@
 // UI приложения: панель параметров, графики, сводка, ручной и автоматический режимы.
 
 import pumpsData from "../data/pumps.json";
-import { drawLineChart, type Series } from "./charts.js";
+import { drawLineChart, type Series, type Marker } from "./charts.js";
 import type { PumpDbRecord } from "../core/esp.js";
 import { EspPump, polyfitDeg2 } from "../core/esp.js";
 import {
@@ -201,6 +201,7 @@ function recalc(): void {
   lastSolution = v;
   lastBaselines = { open, closed };
   valveChartCache = null;
+  nodalChartCache = null;
   (window as unknown as Record<string, unknown>).__dbg = { params: p, solution: v, open, closed };
 
   renderSummary(v, open, closed);
@@ -369,48 +370,109 @@ function drawProfiles(): void {
   }
 }
 
-/** VLP-кривая: pwf, требуемый для подъёма q при заданном p_buf (клапан заморожен). */
-function computeVlp(p: WellParams, db: PumpDbRecord, frozenQValve: number | null): { qs: number[]; pwfs: number[] } {
-  const qs: number[] = [], pwfs: number[] = [];
+export interface VlpResult { qs: number[]; pwfs: number[]; powersKW: number[] }
+
+/**
+ * VLP-кривая: pwf, требуемый для подъёма q при заданном p_buf; попутно электрическая
+ * мощность ЭЦН в каждой точке. valveEnabled=false даёт базовую кривую без клапана.
+ */
+function computeVlp(p: WellParams, db: PumpDbRecord, frozenQValve: number | null, valveEnabled: boolean): VlpResult {
+  const qs: number[] = [], pwfs: number[] = [], powersKW: number[] = [];
+  const pRun: WellParams = valveEnabled ? p : { ...p, valveEnabled: false };
   const qMax = Math.max(p.qTestSm3day * 2, 50);
   const mode = {
-    pCasAtma: lastSolution?.closedValveFeasible ? lastSolution.pCasAtma : p.pCasMaxAtma,
+    pCasAtma: valveEnabled && lastSolution?.closedValveFeasible ? lastSolution.pCasAtma : p.pCasMaxAtma,
     ksepEff: p.ksep,
     qValveOverride: frozenQValve,
   };
   for (let i = 1; i <= 12; i++) {
     const q = (qMax * i) / 12;
-    let lo = 1, hi = p.pResAtma;
-    const g = (pwf: number) => calcWellFromPwf(pwf, p, db, { ...mode, qLiqOverride: q }).pBufCalcAtma - p.pBufAtma;
+    let lo = 1, hi = pRun.pResAtma;
+    const g = (pwf: number) => calcWellFromPwf(pwf, pRun, db, { ...mode, qLiqOverride: q }).pBufCalcAtma - pRun.pBufAtma;
     if (g(hi) < 0) continue; // не поднимает
-    for (let k = 0; k < 22; k++) {
+    for (let k = 0; k < 18; k++) {
       const mid = 0.5 * (lo + hi);
       if (g(mid) > 0) hi = mid; else lo = mid;
       if (hi - lo < 0.1) break;
     }
+    const pwf = 0.5 * (lo + hi);
+    const sol = calcWellFromPwf(pwf, pRun, db, { ...mode, qLiqOverride: q });
     qs.push(q);
-    pwfs.push(0.5 * (lo + hi));
+    pwfs.push(pwf);
+    powersKW.push(sol.powerElectricW / 1000);
   }
-  return { qs, pwfs };
+  return { qs, pwfs, powersKW };
 }
 
+interface NodalCache { version: number; withValve: VlpResult; noValve: VlpResult }
+let nodalChartCache: NodalCache | null = null;
+
 function drawNodal(): void {
-  if (!lastSolution || !lastParams || !lastDb) return;
+  if (!lastSolution || !lastParams || !lastDb || !lastBaselines) return;
   const v = lastSolution, p = lastParams, db = lastDb;
   const ipr = buildIprCurve({
     pResAtma: p.pResAtma, pbAtma: p.pbIprAtma, qTestSm3day: p.qTestSm3day,
     pTestAtma: p.pTestAtma, fwPerc: p.fwPerc,
   }, 60);
-  const frozenQValve = p.valveEnabled ? v.qValveSm3day : null;
-  const vlp = computeVlp(p, db, frozenQValve);
+  // кэш двух кривых подъёма: пересчёт только при изменении параметров
+  if (nodalChartCache === null || nodalChartCache.version !== paramVersion) {
+    const withValve = p.valveEnabled
+      ? computeVlp(p, db, v.qValveSm3day, true)
+      : computeVlp(p, db, null, false);
+    const noValve = computeVlp(p, db, null, false);
+    nodalChartCache = { version: paramVersion, withValve, noValve };
+  }
+  const vlpV = nodalChartCache.withValve;
+  const vlpN = nodalChartCache.noValve;
+
+  const nodalSeries: Series[] = [
+    { xs: ipr.map((q) => q.qSm3day), ys: ipr.map((q) => q.pwfAtma), color: "#2e7d32", label: "IPR (Вогель)" },
+    {
+      xs: vlpV.qs, ys: vlpV.pwfs, color: "#1565c0",
+      label: p.valveEnabled ? "Подъём (с клапаном)" : "Подъём (VLP)",
+    },
+  ];
+  const nodalMarkers: Marker[] = [];
+  if (v.ok) nodalMarkers.push({ x: v.qLiqSm3day, y: v.pwfAtma, color: "#e65100", label: "рабочая точка" });
+  if (p.valveEnabled) {
+    nodalSeries.push({ xs: vlpN.qs, ys: vlpN.pwfs, color: "#546e7a", label: "Подъём (без клапана)", dashed: true });
+    if (lastBaselines.open.ok && lastBaselines.open.qLiqSm3day > 0) {
+      nodalMarkers.push({
+        x: lastBaselines.open.qLiqSm3day, y: lastBaselines.open.pwfAtma,
+        color: "#546e7a", label: "точка без клапана",
+      });
+    }
+  }
   drawLineChart({
     canvas: document.getElementById("chart-nodal") as HTMLCanvasElement,
     xLabel: "Дебит жидкости, м3/сут", yLabel: "Забойное давление, атм",
-    series: [
-      { xs: ipr.map((q) => q.qSm3day), ys: ipr.map((q) => q.pwfAtma), color: "#2e7d32", label: "IPR (Вогель)" },
-      { xs: vlp.qs, ys: vlp.pwfs, color: "#1565c0", label: "Подъём (VLP)" },
-    ],
-    markers: v.ok ? [{ x: v.qLiqSm3day, y: v.pwfAtma, color: "#e65100", label: "рабочая точка" }] : [],
+    series: nodalSeries, markers: nodalMarkers,
+  });
+
+  // энергопотребление от дебита
+  const powerSeries: Series[] = [
+    {
+      xs: vlpV.qs, ys: vlpV.powersKW, color: "#c62828",
+      label: p.valveEnabled ? "С клапаном" : "Мощность",
+    },
+  ];
+  const powerMarkers: Marker[] = [];
+  if (v.ok && vlpV.qs.length > 0) {
+    powerMarkers.push({ x: v.qLiqSm3day, y: v.powerElectricW / 1000, color: "#e65100", label: "рабочая точка" });
+  }
+  if (p.valveEnabled) {
+    powerSeries.push({ xs: vlpN.qs, ys: vlpN.powersKW, color: "#546e7a", label: "Без клапана", dashed: true });
+    if (lastBaselines.open.ok && lastBaselines.open.qLiqSm3day > 0) {
+      powerMarkers.push({
+        x: lastBaselines.open.qLiqSm3day, y: lastBaselines.open.powerElectricW / 1000,
+        color: "#546e7a", label: "точка без клапана",
+      });
+    }
+  }
+  drawLineChart({
+    canvas: document.getElementById("chart-power") as HTMLCanvasElement,
+    xLabel: "Дебит жидкости, м3/сут", yLabel: "Эл. мощность, кВт",
+    series: powerSeries, markers: powerMarkers,
   });
 }
 
