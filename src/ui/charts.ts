@@ -14,6 +14,10 @@ export interface Marker {
   y: number;
   color: string;
   label?: string;
+  /** вертикальный сдвиг подписи в px относительно точки (по умолчанию -6, выше точки) */
+  labelDy?: number;
+  /** сторона подписи от точки (по умолчанию справа) */
+  labelSide?: "left" | "right";
 }
 
 export interface VLine {
@@ -212,8 +216,9 @@ export function drawLineChart(spec: LineChartSpec): void {
     if (mk.label) {
       ctx.fillStyle = "#222";
       ctx.font = "11px sans-serif";
-      ctx.textAlign = "left";
-      ctx.fillText(mk.label, X(mk.x) + 8, Y(mk.y) - 6);
+      const side = mk.labelSide ?? "right";
+      ctx.textAlign = side === "right" ? "left" : "right";
+      ctx.fillText(mk.label, X(mk.x) + (side === "right" ? 8 : -8), Y(mk.y) + (mk.labelDy ?? -6));
     }
   }
 

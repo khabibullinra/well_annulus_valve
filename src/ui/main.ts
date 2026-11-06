@@ -433,13 +433,15 @@ function drawNodal(): void {
     },
   ];
   const nodalMarkers: Marker[] = [];
-  if (v.ok) nodalMarkers.push({ x: v.qLiqSm3day, y: v.pwfAtma, color: "#e65100", label: "рабочая точка" });
+  if (v.ok) {
+    nodalMarkers.push({ x: v.qLiqSm3day, y: v.pwfAtma, color: "#e65100", label: "рабочая точка", labelDy: -12 });
+  }
   if (p.valveEnabled) {
     nodalSeries.push({ xs: vlpN.qs, ys: vlpN.pwfs, color: "#546e7a", label: "Подъём (без клапана)", dashed: true });
     if (lastBaselines.open.ok && lastBaselines.open.qLiqSm3day > 0) {
       nodalMarkers.push({
         x: lastBaselines.open.qLiqSm3day, y: lastBaselines.open.pwfAtma,
-        color: "#546e7a", label: "точка без клапана",
+        color: "#546e7a", label: "точка без клапана", labelDy: 18, labelSide: "left",
       });
     }
   }
@@ -458,14 +460,14 @@ function drawNodal(): void {
   ];
   const powerMarkers: Marker[] = [];
   if (v.ok && vlpV.qs.length > 0) {
-    powerMarkers.push({ x: v.qLiqSm3day, y: v.powerElectricW / 1000, color: "#e65100", label: "рабочая точка" });
+    powerMarkers.push({ x: v.qLiqSm3day, y: v.powerElectricW / 1000, color: "#e65100", label: "рабочая точка", labelDy: -12 });
   }
   if (p.valveEnabled) {
     powerSeries.push({ xs: vlpN.qs, ys: vlpN.powersKW, color: "#546e7a", label: "Без клапана", dashed: true });
     if (lastBaselines.open.ok && lastBaselines.open.qLiqSm3day > 0) {
       powerMarkers.push({
         x: lastBaselines.open.qLiqSm3day, y: lastBaselines.open.powerElectricW / 1000,
-        color: "#546e7a", label: "точка без клапана",
+        color: "#546e7a", label: "точка без клапана", labelDy: 18, labelSide: "left",
       });
     }
   }
