@@ -218,6 +218,7 @@ function emptySolution(): WellSolution {
     liquidLevelM: null, gasAtIntake: false, pTubAtValveAtma: 0, pAnnAtValveAtma: 0, pAnnAtLevelAtma: null,
     pump: null, powerShaftW: 0, powerElectricW: 0, specificEnergyKwhM3: 0, headM: 0,
     profiles: { belowPump: [], tubingBottom: [], tubing: [], annulus: [] }, tDisC: 0,
+    pumpFeed: null,
   };
 }
 
@@ -488,7 +489,7 @@ function drawNodal(): void {
 }
 
 function drawPump(): void {
-  if (!lastSolution || !lastParams || !lastDb || !lastSolution.pump) return;
+  if (!lastSolution || !lastParams || !lastDb || !lastSolution.pump || !lastSolution.pumpFeed) return;
   const v = lastSolution, p = lastParams, db = lastDb;
   const pumpRes = lastSolution.pump;
   const b = db.freqHz / p.freqHz;
@@ -497,48 +498,66 @@ function drawPump(): void {
   const gc = Math.max(v.gasCorr, 0);
   const rhoMixRef = pumpRes.rhoMixIntakeKgm3 || 900;
 
-  const qs: number[] = [], headW: number[] = [], headG: number[] = [];
-  const powWkW: number[] = [], powGkW: number[] = [];
-  const effW: number[] = [], effG: number[] = [];
+  // --- номинальные кривые (вода, пунктир) ---
+  const qsNom: number[] = [], headW: number[] = [], powWkW: number[] = [], effW: number[] = [];
   for (let i = 0; i <= 60; i++) {
     const q = (qMax * 1.02 * i) / 60;
     const h1 = curveAt(db.ratePoints, db.headPoints, q * b);
     const pw1 = curveAt(db.ratePoints, db.powerPoints, q * b);
     const ef1 = Math.max(0, curveAt(db.ratePoints, db.effPoints, q * b));
-    const hw = b ** -2 * stages * h1;
-    const pww = b ** -3 * stages * pw1;
-    qs.push(q);
-    headW.push(hw);
-    headG.push(hw * gc);
-    powWkW.push(pww);
-    powGkW.push(pww * rhoMixRef / 1000);
+    qsNom.push(q);
+    headW.push(b ** -2 * stages * h1);
+    powWkW.push(b ** -3 * stages * pw1);
     effW.push(ef1);
-    effG.push(ef1 * gc);
+  }
+
+  // --- расчётные кривые (сплошные): тот же ступенчатый марш, что в расчёте,
+  // при ФИКСИРОВАННОМ давлении приёма и варьировании дебита жидкости.
+  // Маркеры рабочей точки получаются этим же маршем — потому лежат на кривых. ---
+  const esp = new EspPump(db, {
+    stageNum: stages, freqHz: p.freqHz, gasCorrectModel: p.gasCorrectModel,
+  });
+  const qsOp: number[] = [], headG: number[] = [], powGkW: number[] = [], effG: number[] = [];
+  const nPts = 40;
+  const qLiqOp = lastParams ? v.qLiqSm3day : 0;
+  const qMin = qLiqOp / 6;
+  for (let i = 0; i <= nPts; i++) {
+    const q = qMin + ((qMax * 1.6 - qMin) * i) / nPts;
+    const f = v.pumpFeed!.clone();
+    f.params.qLiqSm3day = q;
+    const res = esp.calcEsp(f, v.pIntakeAtma, pumpRes.tIntakeC, pumpRes.tIntakeC);
+    const qMix = res.qMixIntakeRcM3day;
+    // за пределом работоспособности (отрицательный напор, срыв марша) кривую обрываем
+    if (!isFinite(qMix) || !isFinite(res.headM) || res.headM < -1) break;
+    qsOp.push(qMix);
+    headG.push(res.headM);
+    powGkW.push(res.powerShaftW / 1000);
+    effG.push(res.effD);
   }
 
   const note =
     `Характеристики скорректированы под скважинные условия: P_приёма = ${f1(v.pIntakeAtma)} атм, ` +
     `T = ${f1(pumpRes.tIntakeC)} °C, деградация по газу ×${f2(gc)} (ГСФ на приёме ${(v.gasFracIntake * 100).toFixed(1)}%), ` +
-    `смесь ρ=${f0(rhoMixRef)} кг/м3. Пунктир — номинал (вода), сплошная — по которым ведётся расчёт.`;
+    `смесь ρ=${f0(rhoMixRef)} кг/м3. Пунктир — номинал (вода), сплошная — ступенчатый расчёт, по которому ведётся расчёт рабочей точки.`;
 
   drawTripleAxisChart({
     canvas: document.getElementById("chart-pump-catalog") as HTMLCanvasElement,
-    xLabel: "Расход смеси, м3/сут",
+    xLabel: "Расход смеси НА ПРИЁМЕ насоса, м3/сут",
     axisLabels: ["Напор, м", "Мощность, кВт", "КПД, д.е."],
     note,
     series: [
-      { xs: qs, ys: headW, color: "#1565c0", dashed: true, axis: 0, label: "Напор — номинал (вода)" },
-      { xs: qs, ys: headG, color: "#1565c0", axis: 0, label: "Напор — расчёт (× деградация)", widthPx: 2.6 },
-      { xs: qs, ys: powWkW, color: "#c62828", dashed: true, axis: 1, label: "Мощность — номинал (вода)" },
-      { xs: qs, ys: powGkW, color: "#c62828", axis: 1, label: "Мощность — расчёт (× ρ смеси)", widthPx: 2.6 },
-      { xs: qs, ys: effW, color: "#2e7d32", dashed: true, axis: 2, label: "КПД — номинал" },
-      { xs: qs, ys: effG, color: "#2e7d32", axis: 2, label: "КПД — расчёт (× деградация)", widthPx: 2.6 },
+      { xs: qsNom, ys: headW, color: "#1565c0", dashed: true, axis: 0, label: "Напор — номинал (вода)" },
+      { xs: qsOp, ys: headG, color: "#1565c0", axis: 0, label: "Напор — расчёт (ступенчатый марш)", widthPx: 2.6 },
+      { xs: qsNom, ys: powWkW, color: "#c62828", dashed: true, axis: 1, label: "Мощность — номинал (вода)" },
+      { xs: qsOp, ys: powGkW, color: "#c62828", axis: 1, label: "Мощность — расчёт (× ρ смеси, деградация)", widthPx: 2.6 },
+      { xs: qsNom, ys: effW, color: "#2e7d32", dashed: true, axis: 2, label: "КПД — номинал" },
+      { xs: qsOp, ys: effG, color: "#2e7d32", axis: 2, label: "КПД — расчёт", widthPx: 2.6 },
     ],
     markers: [
-      { x: pumpRes.qMixRcM3day, y: pumpRes.headM, color: "#e65100", axis: 0 },
-      { x: pumpRes.qMixRcM3day, y: pumpRes.powerShaftW / 1000, color: "#e65100", axis: 1 },
+      { x: pumpRes.qMixIntakeRcM3day, y: pumpRes.headM, color: "#e65100", axis: 0 },
+      { x: pumpRes.qMixIntakeRcM3day, y: pumpRes.powerShaftW / 1000, color: "#e65100", axis: 1 },
       {
-        x: pumpRes.qMixRcM3day, y: pumpRes.effD, color: "#e65100", axis: 2,
+        x: pumpRes.qMixIntakeRcM3day, y: pumpRes.effD, color: "#e65100", axis: 2,
         label: "раб. точка", labelDy: -10,
       },
     ],
@@ -547,7 +566,7 @@ function drawPump(): void {
   document.getElementById("pump-note-detail")!.innerHTML =
     `<table class="kv">
       <tr><td>Насос / ступеней / частота</td><td>${db.id} / ${stages} / ${p.freqHz} Гц (кривая БД ${db.freqHz} Гц)</td>
-          <td>Расход смеси через насос</td><td>${f1(pumpRes.qMixRcM3day)} м3/сут</td></tr>
+          <td>Расход смеси на приёме</td><td>${f1(pumpRes.qMixIntakeRcM3day)} м3/сут</td></tr>
       <tr><td>Напор суммарный (расч.)</td><td>${f0(pumpRes.headM)} м (${f2(pumpRes.headM / stages)} м/ступ)</td>
           <td>Мощность на валу / эл.</td><td>${f1(pumpRes.powerShaftW / 1000)} / ${f1(v.powerElectricW / 1000)} кВт</td></tr>
       <tr><td>КПД насоса (расч.)</td><td>${f2(pumpRes.effD)}</td>

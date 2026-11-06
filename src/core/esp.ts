@@ -172,7 +172,8 @@ export interface EspCalcResult {
   effD: number; // КПД
   gasFracIntake: number;
   gasCorr: number;
-  qMixRcM3day: number; // смесь через насос (пласт. усл.), м3/сут
+  qMixRcM3day: number; // смесь через насос на последней ступени (выкид), м3/сут
+  qMixIntakeRcM3day: number; // смесь на приёме насоса (первая ступень), м3/сут
   rhoMixIntakeKgm3: number; // плотность смеси на приёме (для графиков мощности)
 }
 
@@ -272,8 +273,12 @@ export class EspPump {
 
     let st: FeedState = feed.calc(pSt, tIntakeC);
     gasFracIntake = st.gasFractionD;
+    // деградация НА ПРИЁМЕ — конвенциональное значение для отчёта;
+    // в марше по ступеням пересчитывается от давления каждой ступени
     gasCorr = gasCorrectionFactor(o.gasCorrectModel, gasFracIntake);
+    const gasCorrIntake = gasCorr;
     qMixRc = st.qMixRcM3day;
+    const qMixIntake = st.qMixRcM3day;
     const rhoMixIntake = st.rhoMixRcKgm3;
 
     const dNst = 1; // по одной ступени — точно по газосодержанию
@@ -320,8 +325,9 @@ export class EspPump {
       powerShaftW: powEspTot,
       effD: powEspTot > 0 ? powFluidTot / powEspTot : 0,
       gasFracIntake,
-      gasCorr,
+      gasCorr: gasCorrIntake,
       qMixRcM3day: qMixRc,
+      qMixIntakeRcM3day: qMixIntake,
       rhoMixIntakeKgm3: rhoMixIntake,
     };
   }

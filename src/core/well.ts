@@ -107,6 +107,8 @@ export interface WellSolution {
   // профили
   profiles: WellProfileSet;
   tDisC: number;
+  /** флюид на входе в ЭЦН (после сепарации) — для построения расчётных характеристик */
+  pumpFeed: Feed | null;
 }
 
 const geoT = (p: WellParams) => (z: number) => p.tSurfC + (p.geoGradC100 * z) / 100;
@@ -328,6 +330,7 @@ export function calcWellFromPwf(
       annulus: annulus?.nodes ?? [],
     },
     tDisC: pump.tDisC,
+    pumpFeed,
   };
 }
 
