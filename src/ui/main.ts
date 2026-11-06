@@ -341,18 +341,29 @@ function drawProfiles(): void {
     ],
   });
 
-  // газосодержание в НКТ
+  // истинное газосодержание: НКТ, затруб (шапка + барботаж), ниже насоса
   const at = [...prof.tubingBottom, ...prof.tubing];
-  if (at.length > 1) {
+  const alphaSeries: Series[] = [];
+  if (at.length > 1) alphaSeries.push({ xs: at.map((n) => n.alpha), ys: at.map((n) => n.zM), color: "#ef6c00", label: "НКТ" });
+  if (prof.annulus.length > 1) {
+    const lv = v.liquidLevelM;
+    if (lv != null) {
+      const gasPart = prof.annulus.filter((n) => n.zM <= lv + 1e-6);
+      const liqPart = prof.annulus.filter((n) => n.zM >= lv - 1e-6);
+      if (gasPart.length > 1) alphaSeries.push({ xs: gasPart.map((n) => n.alpha), ys: gasPart.map((n) => n.zM), color: "#2e7d32", label: "затруб: шапка (α=1)" });
+      if (liqPart.length > 1) alphaSeries.push({ xs: liqPart.map((n) => n.alpha), ys: liqPart.map((n) => n.zM), color: "#66bb6a", label: "затруб: барботаж", dashed: true });
+    } else {
+      alphaSeries.push({ xs: prof.annulus.map((n) => n.alpha), ys: prof.annulus.map((n) => n.zM), color: "#2e7d32", label: "затруб (барботаж)" });
+    }
+  }
+  if (prof.belowPump.length > 1) {
+    alphaSeries.push({ xs: prof.belowPump.map((n) => n.alpha), ys: prof.belowPump.map((n) => n.zM), color: "#6a1b9a", label: "ниже насоса" });
+  }
+  if (alphaSeries.length > 0) {
     drawLineChart({
       canvas: document.getElementById("chart-alpha") as HTMLCanvasElement,
       xLabel: "Истинное газосодержание, д.е.", yLabel: "Глубина, м",
-      series: [
-        { xs: at.map((n) => n.alpha), ys: at.map((n) => n.zM), color: "#ef6c00", label: "НКТ" },
-        ...(prof.annulus.length > 1
-          ? [{ xs: prof.annulus.map((n) => n.alpha), ys: prof.annulus.map((n) => n.zM), color: "#2e7d32", label: "затруб (барботаж)" } as Series]
-          : []),
-      ],
+      series: alphaSeries,
       yInverted: true, yMin: 0, yMax: p.hPerfM + 100, xMin: 0,
     });
   }
