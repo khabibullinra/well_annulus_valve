@@ -41,9 +41,9 @@ const NUM_FIELDS: NumField[] = [
   { key: "gammaWat", label: "Плотность воды", unit: "г/см3", min: 0.95, max: 1.2, step: 0.005, def: 1.0, group: "PVT" },
   { key: "rsbM3m3", label: "Газосодержание Rs", unit: "м3/м3", min: 0, max: 400, step: 1, def: 80, group: "PVT" },
   { key: "rpM3m3", label: "Рабочий ГФ", unit: "м3/м3", min: 0, max: 400, step: 1, def: 80, group: "PVT" },
-  { key: "pbAtma", label: "Pнас пользователя (0=расч.)", unit: "атм", min: 0, max: 600, step: 1, def: 0, group: "PVT" },
-  { key: "bOilbM3m3", label: "Bo при Pнас (0=расч.)", unit: "м3/м3", min: 0, max: 3, step: 0.01, def: 0, group: "PVT" },
-  { key: "muOilbCP", label: "Мюн при Pнас (0=расч.)", unit: "сП", min: 0, max: 500, step: 0.5, def: 0, group: "PVT" },
+  { key: "pbAtma", label: "Давление насыщения (0=расч.)", unit: "атм", min: 0, max: 600, step: 1, def: 100, group: "PVT" },
+  { key: "bOilbM3m3", label: "Bo при Pнас (0=расч.)", unit: "м3/м3", min: 0, max: 3, step: 0.01, def: 1.2, group: "PVT" },
+  { key: "muOilbCP", label: "Вязкость при Pнас (0=расч.)", unit: "сП", min: 0, max: 500, step: 0.5, def: 1, group: "PVT" },
   { key: "tResC", label: "Пластовая температура", unit: "°C", min: 10, max: 200, step: 1, def: 90, group: "PVT" },
   // Конструкция
   { key: "hPerfM", label: "Глубина перфораций", unit: "м", min: 100, max: 5000, step: 10, def: 2500, group: "Конструкция" },
